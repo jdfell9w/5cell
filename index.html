@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>4-Simplex / 5-Cell with Vertex 120-Cell Motifs</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <style>
+    html, body { margin:0; height:100%; overflow:hidden; background:#02040a; font-family:Arial, sans-serif; }
+    #ui {
+      position:fixed; top:12px; left:12px; z-index:20; width:min(360px, calc(100vw - 24px));
+      background:rgba(4,10,20,0.78); color:#eaf2ff; border:1px solid rgba(120,170,255,0.35);
+      border-radius:14px; padding:12px 14px; backdrop-filter: blur(8px);
+      box-shadow:0 0 20px rgba(0,0,0,0.35);
+    }
+    #ui h1 { margin:0 0 10px 0; font-size:18px; color:#ffffff; }
+    #ui p { margin:4px 0 10px 0; font-size:13px; line-height:1.3; color:#cddcff; }
+    .row { display:grid; grid-template-columns: 68px 1fr 48px; gap:8px; align-items:center; margin:8px 0; }
+    .row label { font-size:13px; color:#dbe8ff; }
+    .row output { font-size:12px; text-align:right; color:#9fd1ff; }
+    input[type=range] { width:100%; }
+    .buttons { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    button {
+      border:none; border-radius:10px; padding:9px 12px; background:#15315f; color:white; font-size:13px; cursor:pointer;
+    }
+    button.active { background:#2a68c9; }
+    #hint { margin-top:10px; font-size:12px; color:#a6bddf; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <h1>5-Cell Vertex 120-Cell Exhibit</h1>
+    <p>Five neon wireframe 120-cell-inspired motifs sit at the vertices of a rotating 4-simplex (5-cell). Sliders control 4D rotation and W-slicing.</p>
+
+    <div class="row"><label for="slice">Slice</label><input id="slice" type="range" min="-1.5" max="1.5" step="0.001" value="0"><output id="sliceVal">0.00</output></div>
+    <div class="row"><label for="thick">Width</label><input id="thick" type="range" min="0.15" max="1.6" step="0.01" value="0.75"><output id="thickVal">0.75</output></div>
+    <div class="row"><label for="xw">XW</label><input id="xw" type="range" min="0" max="6.283" step="0.001" value="0.5"><output id="xwVal">0.50</output></div>
+    <div class="row"><label for="yw">YW</label><input id="yw" type="range" min="0" max="6.283" step="0.001" value="1.0"><output id="ywVal">1.00</output></div>
+    <div class="row"><label for="zw">ZW</label><input id="zw" type="range" min="0" max="6.283" step="0.001" value="1.7"><output id="zwVal">1.70</output></div>
+    <div class="row"><label for="xy">XY</label><input id="xy" type="range" min="0" max="6.283" step="0.001" value="0.35"><output id="xyVal">0.35</output></div>
+
+    <div class="buttons">
+      <button id="autoRotate" class="active">Auto Rotate</button>
+      <button id="autoSlice" class="active">Auto Slice</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+    <div id="hint">Desktop / tablet: drag to look around. VR: use Enter VR. The five colors correspond to the five simplex vertices.</div>
+  </div>
+
+  <a-scene renderer="colorManagement:true; physicallyCorrectLights:false; antialias:true" background="color:#02040a">
+    <a-entity light="type: ambient; intensity: 0.7; color: #c9d8ff"></a-entity>
+    <a-entity light="type: directional; intensity: 0.65; color: #ffffff" position="2 4 2"></a-entity>
+
+    <a-entity id="rig" position="0 1.6 12">
+      <a-camera id="cam" look-controls="touchEnabled:true; magicWindowTrackingEnabled:true" wasd-controls-enabled="true"></a-camera>
+    </a-entity>
+
+    <a-entity id="exhibit" simplex-fivecell></a-entity>
+  </a-scene>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const ui = {
+    slice: $('slice'), thick: $('thick'), xw: $('xw'), yw: $('yw'), zw: $('zw'), xy: $('xy'),
+    sliceVal: $('sliceVal'), thickVal: $('thickVal'), xwVal: $('xwVal'), ywVal: $('ywVal'), zwVal: $('zwVal'), xyVal: $('xyVal'),
+    autoRotate: $('autoRotate'), autoSlice: $('autoSlice'), resetBtn: $('resetBtn')
+  };
+
+  const state = {
+    autoRotate: true,
+    autoSlice: true
+  };
+
+  function updateOutputs(){
+    ui.sliceVal.value = (+ui.slice.value).toFixed(2);
+    ui.thickVal.value = (+ui.thick.value).toFixed(2);
+    ui.xwVal.value = (+ui.xw.value).toFixed(2);
+    ui.ywVal.value = (+ui.yw.value).toFixed(2);
+    ui.zwVal.value = (+ui.zw.value).toFixed(2);
+    ui.xyVal.value = (+ui.xy.value).toFixed(2);
+  }
+  ['slice','thick','xw','yw','zw','xy'].forEach(id => ui[id].addEventListener('input', updateOutputs));
+  updateOutputs();
+
+  function setButton(btn, on){ btn.classList.toggle('active', on); }
+  ui.autoRotate.onclick = () => { state.autoRotate = !state.autoRotate; setButton(ui.autoRotate, state.autoRotate); };
+  ui.autoSlice.onclick = () => { state.autoSlice = !state.autoSlice; setButton(ui.autoSlice, state.autoSlice); };
+  ui.resetBtn.onclick = () => {
+    ui.slice.value = 0; ui.thick.value = 0.75; ui.xw.value = 0.5; ui.yw.value = 1.0; ui.zw.value = 1.7; ui.xy.value = 0.35;
+    state.autoRotate = true; state.autoSlice = true; setButton(ui.autoRotate, true); setButton(ui.autoSlice, true); updateOutputs();
+  };
+
+  function rot2(a,b,th){
+    const c=Math.cos(th), s=Math.sin(th), aa=a*c-b*s, bb=a*s+b*c; return [aa,bb];
+  }
+  function rotate4(v, ang){
+    let [x,y,z,w] = v;
+    [x,w] = rot2(x,w,ang.xw);
+    [y,w] = rot2(y,w,ang.yw);
+    [z,w] = rot2(z,w,ang.zw);
+    [x,y] = rot2(x,y,ang.xy);
+    return [x,y,z,w];
+  }
+  function project4(v){
+    const [x,y,z,w] = v;
+    const k = 1.75 / (3.2 - w);
+    return { x:x*k, y:y*k, z:z*k, w:w };
+  }
+
+  AFRAME.registerComponent('simplex-fivecell', {
+    init: function(){
+      const THREE = AFRAME.THREE;
+      const root = new THREE.Group();
+      this.root = root;
+
+      // Regular 5-cell / 4-simplex vertices in R^4.
+      const rawVerts = [
+        [ 1,  1,  1, -1/Math.sqrt(5)],
+        [ 1, -1, -1, -1/Math.sqrt(5)],
+        [-1,  1, -1, -1/Math.sqrt(5)],
+        [-1, -1,  1, -1/Math.sqrt(5)],
+        [ 0,  0,  0,  4/Math.sqrt(5)]
+      ].map(v => v.map(n => n * 2.55));
+      this.verts4 = rawVerts;
+      this.edges = [];
+      for(let i=0;i<5;i++) for(let j=i+1;j<5;j++) this.edges.push([i,j]);
+
+      this.colors = [0xff4df0, 0x33d5ff, 0x6fff52, 0xffa43c, 0x8b6cff];
+      this.vertexGroups = [];
+      this.edgeLines = [];
+
+      const simplexLineMat = new THREE.LineBasicMaterial({ color:0xbfd7ff, transparent:true, opacity:0.42 });
+      this.edges.forEach(() => {
+        const geom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+        const line = new THREE.Line(geom, simplexLineMat.clone());
+        root.add(line);
+        this.edgeLines.push(line);
+      });
+
+      // Create five vertex motifs: stylized 120-cell wireframe proxies built from multiple dodecahedral shells.
+      for(let i=0;i<5;i++){
+        const g = new THREE.Group();
+        const col = this.colors[i];
+        const shellScales = [1.00, 0.84, 0.67, 0.52];
+        const shellRots = [
+          [0,0,0],
+          [0.55,0.35,0.2],
+          [1.0,0.6,0.95],
+          [1.55,0.25,1.1]
+        ];
+        shellScales.forEach((s, idx) => {
+          const geo = new THREE.DodecahedronGeometry(1.0 * s, 0);
+          const edges = new THREE.EdgesGeometry(geo);
+          const mat = new THREE.LineBasicMaterial({ color: col, transparent:true, opacity: Math.max(0.35, 0.95 - idx*0.15) });
+          const wire = new THREE.LineSegments(edges, mat);
+          wire.rotation.set(shellRots[idx][0], shellRots[idx][1], shellRots[idx][2]);
+          g.add(wire);
+        });
+
+        // Add a faint tiny center sphere for vertex readability.
+        const sphere = new THREE.Mesh(
+          new THREE.SphereGeometry(0.09, 10, 10),
+          new THREE.MeshBasicMaterial({ color: col, transparent:true, opacity:0.95 })
+        );
+        g.add(sphere);
+
+        root.add(g);
+        this.vertexGroups.push(g);
+      }
+
+      // Modest star field.
+      const starsGeom = new THREE.BufferGeometry();
+      const starCount = 420;
+      const starPos = new Float32Array(starCount*3);
+      for(let i=0;i<starCount;i++){
+        const r = 42 + Math.random()*38;
+        const a = Math.random()*Math.PI*2;
+        const b = Math.acos(2*Math.random()-1);
+        starPos[i*3+0] = r*Math.sin(b)*Math.cos(a);
+        starPos[i*3+1] = r*Math.cos(b);
+        starPos[i*3+2] = r*Math.sin(b)*Math.sin(a);
+      }
+      starsGeom.setAttribute('position', new THREE.BufferAttribute(starPos,3));
+      const stars = new THREE.Points(starsGeom, new THREE.PointsMaterial({ color:0xa8c8ff, size:0.14, transparent:true, opacity:0.85 }));
+      root.add(stars);
+
+      this.el.setObject3D('mesh', root);
+    },
+
+    tick: function(time){
+      const THREE = AFRAME.THREE;
+      const t = time*0.001;
+
+      if(state.autoRotate){
+        ui.xw.value = ((0.5 + t*0.22) % (Math.PI*2)).toFixed(3);
+        ui.yw.value = ((1.0 + t*0.17) % (Math.PI*2)).toFixed(3);
+        ui.zw.value = ((1.7 + t*0.12) % (Math.PI*2)).toFixed(3);
+        ui.xy.value = ((0.35 + t*0.08) % (Math.PI*2)).toFixed(3);
+      }
+      if(state.autoSlice){
+        ui.slice.value = (Math.sin(t*0.48) * 1.15).toFixed(3);
+      }
+      updateOutputs();
+
+      const ang = {
+        xw: parseFloat(ui.xw.value),
+        yw: parseFloat(ui.yw.value),
+        zw: parseFloat(ui.zw.value),
+        xy: parseFloat(ui.xy.value)
+      };
+      const slice = parseFloat(ui.slice.value);
+      const width = parseFloat(ui.thick.value);
+
+      const proj = this.verts4.map(v => project4(rotate4(v, ang)));
+      const pts = proj.map(p => new THREE.Vector3(p.x*2.6, p.y*2.6 + 1.0, p.z*2.6));
+
+      // update edge lines with slice-aware fading
+      this.edges.forEach(([a,b], idx) => {
+        const pa = pts[a], pb = pts[b];
+        const line = this.edgeLines[idx];
+        line.geometry.setFromPoints([pa, pb]);
+        const wa = Math.abs(proj[a].w - slice), wb = Math.abs(proj[b].w - slice);
+        const vis = Math.max(0.08, 1 - Math.min(1, (wa+wb)/(2*width + 0.001)));
+        line.material.opacity = 0.15 + vis*0.65;
+      });
+
+      // Determine an average edge length for motif sizing.
+      let meanEdge = 0;
+      this.edges.forEach(([a,b]) => meanEdge += pts[a].distanceTo(pts[b]));
+      meanEdge /= this.edges.length;
+      const motifDiameter = meanEdge / 3.0;
+      const motifScale = motifDiameter * 0.52; // proxy size for clustered shells
+
+      this.vertexGroups.forEach((g, i) => {
+        g.position.copy(pts[i]);
+        g.rotation.x += 0.0035;
+        g.rotation.y += 0.0042;
+        g.rotation.z += 0.0027;
+
+        const d = Math.abs(proj[i].w - slice);
+        const visibility = Math.max(0.06, 1 - Math.min(1, d/(width + 0.001)));
+        const scl = 0.3 + visibility*0.7;
+        g.scale.setScalar(motifScale * scl);
+        g.visible = visibility > 0.05;
+        g.traverse(obj => {
+          if(obj.material && obj.material.opacity !== undefined){
+            obj.material.opacity = Math.max(0.08, visibility * (obj.material.color ? 0.95 : 1.0));
+          }
+        });
+      });
+    }
+  });
+})();
+</script>
+</body>
+</html>
