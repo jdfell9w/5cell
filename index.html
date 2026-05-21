@@ -102,7 +102,7 @@
     </div>
 
     <div id="hint">
-      Option A = <strong>slice-aware fading</strong>: each 120-cell edge and vertex fades according to how near its 4D <em>w</em>-coordinate is to the chosen slice plane.
+      Option A = <strong>slice-aware fading</strong>: each 120-cell edge and vertex fades according to how near its 4D <em>w</em>-coordinate is to the chosen slice plane.<br>VR controller map: <strong>left thumbstick</strong> left/right = XW, forward/back = YW. <strong>Right thumbstick</strong> left/right = ZW, forward/back = XY.
     </div>
   </div>
 
@@ -113,6 +113,8 @@
 
     <a-entity id="rig" position="0 1.6 15">
       <a-camera id="cam" look-controls="touchEnabled:true; magicWindowTrackingEnabled:true" wasd-controls-enabled="true"></a-camera>
+      <a-entity id="leftHand" oculus-touch-controls="hand: left" laser-controls="hand: left"></a-entity>
+      <a-entity id="rightHand" oculus-touch-controls="hand: right" laser-controls="hand: right"></a-entity>
     </a-entity>
 
     <a-entity id="exhibit" accurate-fivecell-120></a-entity>
@@ -173,6 +175,67 @@
     setButton(ui.autoSlice, true);
     updateOutputs();
   };
+
+
+  function wrapAngle(v) {
+    const tau = Math.PI * 2;
+    v = v % tau;
+    if (v < 0) v += tau;
+    return v;
+  }
+
+  function inferHand(gp) {
+    const id = String(gp.id || '').toLowerCase();
+    if (gp.hand === 'left' || id.includes('left')) return 'left';
+    if (gp.hand === 'right' || id.includes('right')) return 'right';
+    return '';
+  }
+
+  function applyThumbstickMapping(dt) {
+    if (!navigator.getGamepads) return;
+    const pads = navigator.getGamepads();
+    if (!pads) return;
+
+    const dead = 0.14;
+    const speed = 1.7; // radians per second at full stick
+
+    let lx = 0, ly = 0, rx = 0, ry = 0;
+
+    for (const gp of pads) {
+      if (!gp || !gp.connected || !gp.axes || gp.axes.length < 2) continue;
+      const hand = inferHand(gp);
+      const ax0 = gp.axes[0] || 0;
+      const ax1 = gp.axes[1] || 0;
+
+      if (hand === 'left') {
+        lx = Math.abs(ax0) > dead ? ax0 : 0;
+        ly = Math.abs(ax1) > dead ? ax1 : 0;
+      } else if (hand === 'right') {
+        rx = Math.abs(ax0) > dead ? ax0 : 0;
+        ry = Math.abs(ax1) > dead ? ax1 : 0;
+      }
+    }
+
+    const manualActive = lx || ly || rx || ry;
+    if (!manualActive) return;
+
+    // When the user touches the thumbsticks, pause auto rotation so the manual mapping is clear.
+    if (state.autoRotate) {
+      state.autoRotate = false;
+      setButton(ui.autoRotate, false);
+    }
+
+    const xw = wrapAngle(parseFloat(ui.xw.value) + lx * speed * dt);
+    const yw = wrapAngle(parseFloat(ui.yw.value) - ly * speed * dt); // forward/up increases
+    const zw = wrapAngle(parseFloat(ui.zw.value) + rx * speed * dt);
+    const xy = wrapAngle(parseFloat(ui.xy.value) - ry * speed * dt); // forward/up increases
+
+    ui.xw.value = xw.toFixed(3);
+    ui.yw.value = yw.toFixed(3);
+    ui.zw.value = zw.toFixed(3);
+    ui.xy.value = xy.toFixed(3);
+  }
+
 
   function rot2(a,b,th) {
     const c = Math.cos(th), s = Math.sin(th);
@@ -283,9 +346,12 @@
       root.add(stars);
     },
 
-    tick: function(time){
+    tick: function(time, timeDelta){
       const THREE = AFRAME.THREE;
       const t = time * 0.001;
+      const dt = (timeDelta || 16) * 0.001;
+
+      applyThumbstickMapping(dt);
 
       if (state.autoRotate) {
         ui.xw.value = ((0.50 + t * 0.20) % (Math.PI * 2)).toFixed(3);
