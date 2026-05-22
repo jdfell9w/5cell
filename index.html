@@ -122,7 +122,7 @@
     </div>
 
     <div id="hint">
-      Option A = <strong>slice-aware fading</strong>: each 120-cell edge and vertex fades according to how near its 4D <em>w</em>-coordinate is to the chosen slice plane.<br>VR controller map: <strong>left thumbstick</strong> left/right = XW, forward/back = YW. <strong>Right thumbstick</strong> left/right = ZW, forward/back = XY. This test build shows live gamepad axes in the lower-right corner.
+      Option A = <strong>slice-aware fading</strong>: each 120-cell edge and vertex fades according to how near its 4D <em>w</em>-coordinate is to the chosen slice plane.<br>VR controller map: <strong>left thumbstick</strong> left/right = XW, forward/back = YW. <strong>Right thumbstick</strong> left/right = ZW, forward/back = XY. This test build shows live A-Frame thumbstick events and gamepad axes in the lower-right corner.
     </div>
   </div>
 
@@ -164,6 +164,56 @@ If axes stay at 0.00, browser gamepad axes are not being exposed.</div>
     autoRotate: true,
     autoSlice: true
   };
+
+  const thumbEventState = {
+    left: { x: 0, y: 0, seen: false, t: 0, source: 'none' },
+    right: { x: 0, y: 0, seen: false, t: 0, source: 'none' },
+    anySeen: false
+  };
+
+  function setThumbFromEvent(hand, x, y, source) {
+    if (!thumbEventState[hand]) return;
+    thumbEventState[hand].x = Number(x) || 0;
+    thumbEventState[hand].y = Number(y) || 0;
+    thumbEventState[hand].seen = true;
+    thumbEventState[hand].t = performance.now();
+    thumbEventState[hand].source = source || 'event';
+    thumbEventState.anySeen = true;
+  }
+
+  function installThumbstickEventListeners() {
+    const bindings = [
+      { id: 'leftHand', hand: 'left' },
+      { id: 'rightHand', hand: 'right' }
+    ];
+
+    bindings.forEach(({ id, hand }) => {
+      const el = document.getElementById(id);
+      if (!el || el.__thumbListenersInstalled) return;
+      el.__thumbListenersInstalled = true;
+
+      el.addEventListener('thumbstickmoved', ev => {
+        const d = ev.detail || {};
+        setThumbFromEvent(hand, d.x, d.y, 'thumbstickmoved');
+      });
+
+      el.addEventListener('axismove', ev => {
+        const d = ev.detail || {};
+        const axis = d.axis || d.axes || [];
+        if (axis.length >= 2) {
+          // Use the strongest adjacent pair for broad browser compatibility.
+          let best = [0, 1], bestMag = -1;
+          for (let i = 0; i < axis.length - 1; i++) {
+            const mag = Math.abs(axis[i] || 0) + Math.abs(axis[i + 1] || 0);
+            if (mag > bestMag) { bestMag = mag; best = [i, i + 1]; }
+          }
+          setThumbFromEvent(hand, axis[best[0]], axis[best[1]], `axismove ${best[0]}/${best[1]}`);
+        }
+      });
+    });
+  }
+
+  window.addEventListener('load', installThumbstickEventListeners);
 
   function updateOutputs(){
     ui.sliceVal.value = (+ui.slice.value).toFixed(2);
@@ -265,8 +315,55 @@ If axes stay at 0.00, browser gamepad axes are not being exposed.</div>
   }
 
   function applyThumbstickMapping(dt, time) {
+    installThumbstickEventListeners();
+
+    const dead = 0.12;
+    const speed = 1.7; // radians per second at full stick
+
+    // First try A-Frame / WebXR controller events, which often work when navigator.getGamepads()
+    // exposes no useful axes in Meta Browser.
+    const now = performance.now();
+    const lFresh = thumbEventState.left.seen && (now - thumbEventState.left.t < 450);
+    const rFresh = thumbEventState.right.seen && (now - thumbEventState.right.t < 450);
+
+    let lxEvent = lFresh && Math.abs(thumbEventState.left.x) > dead ? thumbEventState.left.x : 0;
+    let lyEvent = lFresh && Math.abs(thumbEventState.left.y) > dead ? thumbEventState.left.y : 0;
+    let rxEvent = rFresh && Math.abs(thumbEventState.right.x) > dead ? thumbEventState.right.x : 0;
+    let ryEvent = rFresh && Math.abs(thumbEventState.right.y) > dead ? thumbEventState.right.y : 0;
+
+    const eventActive = lxEvent || lyEvent || rxEvent || ryEvent;
+    if (eventActive) {
+      controllerState.manualEverSeen = true;
+      if (state.autoRotate) {
+        state.autoRotate = false;
+        setButton(ui.autoRotate, false);
+      }
+
+      ui.xw.value = wrapAngle(parseFloat(ui.xw.value) + lxEvent * speed * dt).toFixed(3);
+      ui.yw.value = wrapAngle(parseFloat(ui.yw.value) - lyEvent * speed * dt).toFixed(3);
+      ui.zw.value = wrapAngle(parseFloat(ui.zw.value) + rxEvent * speed * dt).toFixed(3);
+      ui.xy.value = wrapAngle(parseFloat(ui.xy.value) - ryEvent * speed * dt).toFixed(3);
+
+      if (!time || time - controllerState.lastDebug > 120) {
+        controllerState.lastDebug = time || 0;
+        updateGamepadDebug([
+          'USING A-FRAME CONTROLLER EVENTS',
+          `left source=${thumbEventState.left.source} x=${thumbEventState.left.x.toFixed(2)} y=${thumbEventState.left.y.toFixed(2)}`,
+          `right source=${thumbEventState.right.source} x=${thumbEventState.right.x.toFixed(2)} y=${thumbEventState.right.y.toFixed(2)}`,
+          '',
+          `mapped: left => XW/YW, right => ZW/XY`,
+          `sliders: XW=${Number(ui.xw.value).toFixed(2)} YW=${Number(ui.yw.value).toFixed(2)} ZW=${Number(ui.zw.value).toFixed(2)} XY=${Number(ui.xy.value).toFixed(2)}`,
+          'STATUS: thumbstick event input detected.'
+        ]);
+      }
+      return;
+    }
+
     if (!navigator.getGamepads) {
-      updateGamepadDebug(['navigator.getGamepads() unavailable in this browser.']);
+      updateGamepadDebug([
+        'navigator.getGamepads() unavailable.',
+        thumbEventState.anySeen ? 'A-Frame events were seen before, but none are active now.' : 'No A-Frame thumbstick events seen yet.'
+      ]);
       return;
     }
 
@@ -282,8 +379,6 @@ If axes stay at 0.00, browser gamepad axes are not being exposed.</div>
       return;
     }
 
-    const dead = 0.12;
-    const speed = 1.7; // radians per second at full stick
     let lx = 0, ly = 0, rx = 0, ry = 0;
     let leftPair = '', rightPair = '';
 
