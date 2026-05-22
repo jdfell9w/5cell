@@ -81,6 +81,26 @@
       font-size: 12px;
       color: #a6bddf;
     }
+    #gamepadDebug {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 25;
+      width: min(420px, calc(100vw - 24px));
+      max-height: 42vh;
+      overflow: auto;
+      background: rgba(2, 8, 18, 0.86);
+      color: #dff0ff;
+      border: 1px solid rgba(120, 190, 255, 0.4);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font: 12px/1.35 monospace;
+      white-space: pre-wrap;
+      box-shadow: 0 0 20px rgba(0,0,0,0.45);
+    }
+    #gamepadDebug b {
+      color: #ffffff;
+    }
   </style>
 </head>
 <body>
@@ -102,9 +122,14 @@
     </div>
 
     <div id="hint">
-      Option A = <strong>slice-aware fading</strong>: each 120-cell edge and vertex fades according to how near its 4D <em>w</em>-coordinate is to the chosen slice plane.<br>VR controller map: <strong>left thumbstick</strong> left/right = XW, forward/back = YW. <strong>Right thumbstick</strong> left/right = ZW, forward/back = XY.
+      Option A = <strong>slice-aware fading</strong>: each 120-cell edge and vertex fades according to how near its 4D <em>w</em>-coordinate is to the chosen slice plane.<br>VR controller map: <strong>left thumbstick</strong> left/right = XW, forward/back = YW. <strong>Right thumbstick</strong> left/right = ZW, forward/back = XY. This test build shows live gamepad axes in the lower-right corner.
     </div>
   </div>
+
+  <div id="gamepadDebug"><b>Gamepad / thumbstick test</b>
+Waiting for controllers...
+Move thumbsticks after entering VR.
+If axes stay at 0.00, browser gamepad axes are not being exposed.</div>
 
   <a-scene renderer="colorManagement:true; antialias:true" background="color:#02040a">
     <a-entity light="type: ambient; intensity: 0.78; color: #c8d8ff"></a-entity>
@@ -184,56 +209,128 @@
     return v;
   }
 
-  function inferHand(gp) {
+  const controllerState = {
+    lastDebug: 0,
+    detected: {},
+    manualEverSeen: false
+  };
+
+  function inferHand(gp, index) {
     const id = String(gp.id || '').toLowerCase();
     if (gp.hand === 'left' || id.includes('left')) return 'left';
     if (gp.hand === 'right' || id.includes('right')) return 'right';
+
+    // Fallback convention on many WebXR browsers:
+    // lower gamepad index is often left, next one right.
+    if (index === 0) return 'left';
+    if (index === 1) return 'right';
     return '';
   }
 
-  function applyThumbstickMapping(dt) {
-    if (!navigator.getGamepads) return;
-    const pads = navigator.getGamepads();
-    if (!pads) return;
+  function strongestAxisPair(gp) {
+    const axes = Array.from(gp.axes || []);
+    let bestPair = [0, 1];
+    let bestMag = -1;
 
-    const dead = 0.14;
-    const speed = 1.7; // radians per second at full stick
-
-    let lx = 0, ly = 0, rx = 0, ry = 0;
-
-    for (const gp of pads) {
-      if (!gp || !gp.connected || !gp.axes || gp.axes.length < 2) continue;
-      const hand = inferHand(gp);
-      const ax0 = gp.axes[0] || 0;
-      const ax1 = gp.axes[1] || 0;
-
-      if (hand === 'left') {
-        lx = Math.abs(ax0) > dead ? ax0 : 0;
-        ly = Math.abs(ax1) > dead ? ax1 : 0;
-      } else if (hand === 'right') {
-        rx = Math.abs(ax0) > dead ? ax0 : 0;
-        ry = Math.abs(ax1) > dead ? ax1 : 0;
+    // Try every adjacent pair. Quest browsers sometimes use axes 2/3 instead of 0/1.
+    for (let i = 0; i < axes.length - 1; i += 2) {
+      const mag = Math.abs(axes[i] || 0) + Math.abs(axes[i + 1] || 0);
+      if (mag > bestMag) {
+        bestMag = mag;
+        bestPair = [i, i + 1];
       }
     }
 
-    const manualActive = lx || ly || rx || ry;
-    if (!manualActive) return;
-
-    // When the user touches the thumbsticks, pause auto rotation so the manual mapping is clear.
-    if (state.autoRotate) {
-      state.autoRotate = false;
-      setButton(ui.autoRotate, false);
+    // Also check sliding adjacent pairs for unusual mappings.
+    for (let i = 0; i < axes.length - 1; i++) {
+      const mag = Math.abs(axes[i] || 0) + Math.abs(axes[i + 1] || 0);
+      if (mag > bestMag) {
+        bestMag = mag;
+        bestPair = [i, i + 1];
+      }
     }
 
-    const xw = wrapAngle(parseFloat(ui.xw.value) + lx * speed * dt);
-    const yw = wrapAngle(parseFloat(ui.yw.value) - ly * speed * dt); // forward/up increases
-    const zw = wrapAngle(parseFloat(ui.zw.value) + rx * speed * dt);
-    const xy = wrapAngle(parseFloat(ui.xy.value) - ry * speed * dt); // forward/up increases
+    return {
+      x: axes[bestPair[0]] || 0,
+      y: axes[bestPair[1]] || 0,
+      pair: bestPair,
+      axes
+    };
+  }
 
-    ui.xw.value = xw.toFixed(3);
-    ui.yw.value = yw.toFixed(3);
-    ui.zw.value = zw.toFixed(3);
-    ui.xy.value = xy.toFixed(3);
+  function updateGamepadDebug(lines) {
+    const box = document.getElementById('gamepadDebug');
+    if (!box) return;
+    box.innerHTML = '<b>Gamepad / thumbstick test</b>\n' + lines.join('\n');
+  }
+
+  function applyThumbstickMapping(dt, time) {
+    if (!navigator.getGamepads) {
+      updateGamepadDebug(['navigator.getGamepads() unavailable in this browser.']);
+      return;
+    }
+
+    const pads = Array.from(navigator.getGamepads() || []).filter(Boolean);
+    const debug = [];
+
+    if (!pads.length) {
+      updateGamepadDebug([
+        'No gamepads exposed yet.',
+        'Enter VR, squeeze a trigger, then move both thumbsticks.',
+        'If still blank, Meta Browser may not expose axes in this mode.'
+      ]);
+      return;
+    }
+
+    const dead = 0.12;
+    const speed = 1.7; // radians per second at full stick
+    let lx = 0, ly = 0, rx = 0, ry = 0;
+    let leftPair = '', rightPair = '';
+
+    pads.forEach((gp, idx) => {
+      const hand = inferHand(gp, idx);
+      const data = strongestAxisPair(gp);
+      const ax = Math.abs(data.x) > dead ? data.x : 0;
+      const ay = Math.abs(data.y) > dead ? data.y : 0;
+
+      debug.push(
+        `pad[${idx}] hand=${hand || '?'} id="${String(gp.id || '').slice(0, 42)}"`,
+        `  axes(${data.axes.length}) = [` + data.axes.map(v => Number(v).toFixed(2)).join(', ') + `]`,
+        `  using pair ${data.pair[0]}/${data.pair[1]} => x=${data.x.toFixed(2)} y=${data.y.toFixed(2)}`
+      );
+
+      if (hand === 'left') {
+        lx = ax; ly = ay; leftPair = data.pair.join('/');
+      } else if (hand === 'right') {
+        rx = ax; ry = ay; rightPair = data.pair.join('/');
+      }
+    });
+
+    const manualActive = lx || ly || rx || ry;
+    if (manualActive) {
+      controllerState.manualEverSeen = true;
+      if (state.autoRotate) {
+        state.autoRotate = false;
+        setButton(ui.autoRotate, false);
+      }
+
+      ui.xw.value = wrapAngle(parseFloat(ui.xw.value) + lx * speed * dt).toFixed(3);
+      ui.yw.value = wrapAngle(parseFloat(ui.yw.value) - ly * speed * dt).toFixed(3);
+      ui.zw.value = wrapAngle(parseFloat(ui.zw.value) + rx * speed * dt).toFixed(3);
+      ui.xy.value = wrapAngle(parseFloat(ui.xy.value) - ry * speed * dt).toFixed(3);
+    }
+
+    debug.push('');
+    debug.push(`mapped: left ${leftPair || '-'} => XW/YW, right ${rightPair || '-'} => ZW/XY`);
+    debug.push(`left stick:  x=${lx.toFixed(2)} y=${ly.toFixed(2)}   right stick: x=${rx.toFixed(2)} y=${ry.toFixed(2)}`);
+    debug.push(`sliders: XW=${Number(ui.xw.value).toFixed(2)} YW=${Number(ui.yw.value).toFixed(2)} ZW=${Number(ui.zw.value).toFixed(2)} XY=${Number(ui.xy.value).toFixed(2)}`);
+    debug.push(controllerState.manualEverSeen ? 'STATUS: thumbstick input detected.' : 'STATUS: no nonzero thumbstick axis detected yet.');
+
+    // Throttle debug updates a bit.
+    if (!time || time - controllerState.lastDebug > 120) {
+      controllerState.lastDebug = time || 0;
+      updateGamepadDebug(debug);
+    }
   }
 
 
@@ -351,7 +448,7 @@
       const t = time * 0.001;
       const dt = (timeDelta || 16) * 0.001;
 
-      applyThumbstickMapping(dt);
+      applyThumbstickMapping(dt, time);
 
       if (state.autoRotate) {
         ui.xw.value = ((0.50 + t * 0.20) % (Math.PI * 2)).toFixed(3);
